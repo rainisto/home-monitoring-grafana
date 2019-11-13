@@ -5,23 +5,27 @@
 This script receives MQTT data and saves those to InfluxDB.
 
 """
-
+import json
 import re
 from typing import NamedTuple
 
 import paho.mqtt.client as mqtt
 from influxdb import InfluxDBClient
 
-INFLUXDB_ADDRESS = 'influxdb'
+INFLUXDB_ADDRESS = '192.168.1.8'
 INFLUXDB_USER = 'root'
 INFLUXDB_PASSWORD = 'root'
 INFLUXDB_DATABASE = 'home_db'
 
-MQTT_ADDRESS = 'mosquitto'
-MQTT_USER = 'mqttuser'
-MQTT_PASSWORD = 'mqttpassword'
+MQTT_ADDRESS = '192.168.1.4'
+MQTT_USER = ''
+MQTT_PASSWORD = ''
 MQTT_TOPIC = 'home/+/+'  # [bme280|mijia]/[temperature|humidity|battery|status]
+MQTT_TOPIC_HA = 'homeassistant/sensor/+/state'
+MQTT_TOPIC_ZIG = 'zigbee2mqtt/+'
 MQTT_REGEX = 'home/([^/]+)/([^/]+)'
+MQTT_REGEX_HA = 'homeassistant/sensor/([^/]+)/state'
+MQTT_REGEX_ZIG = 'zigbee2mqtt/([^/]+)'
 MQTT_CLIENT_ID = 'MQTTInfluxDBBridge'
 
 influxdb_client = InfluxDBClient(INFLUXDB_ADDRESS, 8086, INFLUXDB_USER, INFLUXDB_PASSWORD, None)
@@ -37,6 +41,8 @@ def on_connect(client, userdata, flags, rc):
     """ The callback for when the client receives a CONNACK response from the server."""
     print('Connected with result code ' + str(rc))
     client.subscribe(MQTT_TOPIC)
+    client.subscribe(MQTT_TOPIC_HA)
+    client.subscribe(MQTT_TOPIC_ZIG)
 
 
 def on_message(client, userdata, msg):
@@ -46,15 +52,36 @@ def on_message(client, userdata, msg):
     if sensor_data is not None:
         _send_sensor_data_to_influxdb(sensor_data)
 
-
 def _parse_mqtt_message(topic, payload):
     match = re.match(MQTT_REGEX, topic)
+    match_ha = re.match(MQTT_REGEX_HA, topic)
+    match_zig = re.match(MQTT_REGEX_ZIG, topic)
     if match:
         location = match.group(1)
         measurement = match.group(2)
         if measurement == 'status':
             return None
         return SensorData(location, measurement, float(payload))
+    elif match_ha:
+        location = match_ha.group(1)
+        payload_dict = json.loads(payload)
+        if 'temperature' in payload_dict:
+            _send_sensor_data_to_influxdb(SensorData(location, "temperature", payload_dict['temperature']))
+        if 'humidity' in payload_dict:
+            _send_sensor_data_to_influxdb(SensorData(location, "humidity", payload_dict['humidity']))
+        if 'pressure' in payload_dict:
+            _send_sensor_data_to_influxdb(SensorData(location, "pressure", payload_dict['pressure']))
+        return None
+    elif match_zig:
+        location = match_zig.group(1)
+        payload_dict = json.loads(payload)
+        if 'temperature' in payload_dict:
+            _send_sensor_data_to_influxdb(SensorData(location, "temperature", payload_dict['temperature']))
+        if 'humidity' in payload_dict:
+            _send_sensor_data_to_influxdb(SensorData(location, "humidity", payload_dict['humidity']))
+        if 'pressure' in payload_dict:
+            _send_sensor_data_to_influxdb(SensorData(location, "pressure", payload_dict['pressure']))
+        return None
     else:
         return None
 
